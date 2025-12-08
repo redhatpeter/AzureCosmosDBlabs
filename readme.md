@@ -1,8 +1,8 @@
-# Azure Cosmos DB Workshop
+<!--# Azure Cosmos DB Workshop
 
 Visit Home Page at https://azurecosmosdb.github.io/labs/
 
-<!-- ## Two Day Suggested Schedule
+ ## Two Day Suggested Schedule
 
 - [Sample Schedule](./decks/CosmosDBWorkshopSchedule2019.docx)
 
@@ -25,13 +25,13 @@ Visit Home Page at https://azurecosmosdb.github.io/labs/
 
 - [Use-Case cheat sheet (1-pager)](./decks/1Pager-Use-Cases.pptx) -->
 
-In addition to the above workshop decks, we have hands-on labs. We have labs available for our .NET sdk and Java sdk below:
+# Azure Cosmos DB Labs
+
+We have hands-on labs available for .NET SDK:
 
 ---
 
 ## Core (SQL) API
-
-### .NET (V3) Labs
 
 #### .NET Lab Prerequisites
 
