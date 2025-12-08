@@ -40,10 +40,17 @@ You will start by using the .NET SDK to create containers to use in this and fol
 1. In the terminal pane, enter and execute the following command:
 
     ```sh
-    dotnet add package Microsoft.Azure.Cosmos --version 3.12.0
+    dotnet add package Microsoft.Azure.Cosmos --version 3.43.0
     ```
 
     > This command will add the [Microsoft.Azure.Cosmos](https://www.nuget.org/packages/Microsoft.Azure.Cosmos/) NuGet package as a project dependency. The lab instructions have been tested using the `3.12.0` version of this NuGet package.
+1. Add the Azure.Identity package for Azure AD authentication:
+
+   ```sh
+   dotnet add package Azure.Identity --version 1.17.1
+   ```
+
+   > This package provides the DefaultAzureCredential class for authenticating with Azure Cosmos DB using Azure AD.
 
 1. In the terminal pane, enter and execute the following command:
 
@@ -139,6 +146,33 @@ The CosmosClient class is the main "entry point" to using the Core (SQL) API in 
         }
     }
     ```
+
+### Enable Local Authentication (If Required)
+
+If your Azure Cosmos DB account has local authentication disabled (you'll see a 401 Unauthorized error with "Local Authorization is disabled" message when running the code), you need to enable it using Azure CLI.
+
+Run the following command (use Git Bash with `MSYS_NO_PATHCONV=1` prefix to prevent path conversion):
+
+```bash
+MSYS_NO_PATHCONV=1 az resource update \
+  --ids "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/<your-resource-group>/providers/Microsoft.DocumentDB/databaseAccounts/<your-cosmos-account>" \
+  --set properties.disableLocalAuth=false
+```
+
+Replace `<your-resource-group>` and `<your-cosmos-account>` with your actual values.
+
+**Check Current Status:**
+
+To verify the current local authentication status:
+
+```bash
+az cosmosdb show \
+  --name <your-cosmos-account> \
+  --resource-group <your-resource-group> \
+  --query "{name:name,disableLocalAuth:disableLocalAuth}" -o json
+```
+
+> **Note:** While primary key authentication is convenient for labs and development, Azure AD authentication (using Azure.Identity) is the recommended approach for production scenarios as it provides better security, centralized access management, and audit capabilities.
 
     > We will now execute a build of the application to make sure our code compiles successfully.
 

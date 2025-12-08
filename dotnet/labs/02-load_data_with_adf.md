@@ -71,77 +71,47 @@ You do not need to do Steps 1-4 in this section and can proceed to Step 4 by ope
 
         ![The new data factory dialog is displayed](../media/03-adf_selections.jpg "Add a new Data Factory resource")
 
-1. After creation, open your newly created Data Factory. Select **Author & Monitor** and you will launch ADF.
+1. After creation is completed, click **Launch Studio** to open Azure Data Factory Studio.
 
-    ![The overview blade is displayed for ADF](../media/03-adf_author&monitor.jpg "Select Author and Monitor link")
+1. We will be using ADF for a one-time copy of data from a source JSON file to a database in Cosmos DB's SQL API. Select **Transform data** to begin the data copy process.
+   
+   ![alt text](image-7.png)
 
-1. Select **Copy Data**.
+1. Create link servvice 
+   ![alt text](image-9.png)
+   ![alt text](image-10.png)
+   ![alt text](image-11.png)
 
-   - We will be using ADF for a one-time copy of data from a source JSON file on Azure Blob Storage to a database in Cosmos DB’s SQL API. ADF can also be used for more frequent data transfers from Cosmos DB to other data stores.
+2. Name the source **NutritionJson** and select **SAS URI** as the Authentication method. Use the following SAS URI for read-only access to this Blob Storage container:
 
-    ![The main workspace page is displayed for ADF](../media/03-adf_copydata.jpg "Select the Copy Data activity")
+   ```
+   https://ai102str193837986.blob.core.windows.net/cosmos-sample-data/NutritionData.json?sp=r&st=2025-12-07T14:46:41Z&se=2026-01-30T23:01:41Z&spr=https&sv=2024-11-04&sr=b&sig=KeZ0EMtmuy3gR4yKvEYtadvB94PpZz8W2AITWtF0OYY%3D
+   ```
+   
+3. Configure the source dataset by selecting **Azure Blob Storage** as the data store type.
+   
+   ![alt text](image.png)
 
-1. Edit basic properties for this data copy. You should name the task **ImportNutrition** and select to **Run once now**, then select **Next**
+4. Set up the connection to the blob storage using the SAS URI provided above.
+   
+   ![alt text](image-1.png)
 
-   ![The copy data activity properties dialog is displayed](../media/03-adf_properties.jpg "Enter a task name and the schedule")
+5. Configure the destination by selecting **Azure Cosmos DB (SQL API)** as the data store type. Before proceeding, turn on **Data flow debug** to enable testing and validation of your data transformations.
+   
+   ![alt text](image-2.png)
+   ![alt text](image-13.png)
 
-1. **Create a new connection** and select **Azure Blob Storage**. We will import data from a json file on Azure Blob Storage. In addition to Blob Storage, you can use ADF to migrate from a wide variety of sources. We will not cover migration from these sources in this tutorial.
+6. Select your Azure Cosmos DB account and the **ImportDatabase** database with **FoodCollection** container as the destination.
+   
+   ![alt text](image-3.png)
 
-    ![Create new connection link is highlighted](../media/03-adf_blob.jpg "Create a new connection")
+7. Map the source JSON fields to the Cosmos DB container schema. Ensure the partition key mapping is correct.
+   
+   ![alt text](image-4.png)
 
-    ![Azure Blog Storage is highlighted](../media/03-adf_blob2.jpg "Select the Azure Blob Storage connection type")
-
-1. Name the source **NutritionJson** and select **SAS URI** as the Authentication method. Please use the following SAS URI for read-only access to this Blob Storage container:
-
-     `https://cosmoslabsstorageaccount.blob.core.windows.net/nutrition-data?si=container-list-read-policy&spr=https&sv=2021-06-08&sr=c&sig=jGrmrokYikbgbuW9we2am%2BwAq%2BC%2BxfZcPYswOeSQpAU%3D`
-
-    ![The New linked service dialog is displayed](../media/03-adf_connecttoblob.jpg "Enter the SAS url in the dialog")
-
-1. Select **Create**
-1. Select **Next**
-1. In the **File or Folder** textbox, enter the folder name as ``nutirion-data`` and then click on **Browse** to select the **nutrition-data** folder. Finally select **NutritionData.json** file.
-
-    ![The nutritiiondata folder is displayed](../media/03-adf_choosestudents.jpg "Select the NutritionData.json file")
-
-1. Un-check **Copy file recursively** or **Binary Copy** if they are checked. Also ensure that other fields are empty. Click **Next**
-
-    ![The input file or folder dialog is displayed](../media/03-adf_source_next.jpg "Ensure all other fields are empty, select next")
-
-1. Select the file format as **JSON format**. Then select **Next**.
-
-    !["The file format settings dialog is displayed"](../media/03-adf_source_dataset_format.jpg "Ensure JSON format is selected, then select Next")
-
-1. You have now successfully connected the Blob Storage container with the nutrition.json file as the source.
-
-1. For the **Destination data store** add the Cosmos DB target data store by selecting **Create new connection** and selecting **Azure Cosmos DB (SQL API)**.
-
-    !["The New Linked Service dialog is displayed"](../media/03-adf_selecttarget.jpg "Select the Azure Cosmos DB service type")
-
-1. Name the linked service **targetcosmosdb** and select your Azure subscription and Cosmos DB account. You should also select the Cosmos DB **ImportDatabase** that you created earlier.
-
-    !["The linked service configuration dialog is displayed"](../media/03-adf_selecttargetdb.jpg "Select the ImportDatabase database")
-
-1. Select your newly created **targetcosmosdb** connection as the Destination data store.
-
-    !["The destination data source dialog is displayed"](../media/03-adf_destconnectionnext.jpg "Select your recently created data source")
-
-1. Select your **FoodCollection** container from the drop-down menu. You will map your Blob storage file to the correct Cosmos DB container. Select **Next** to continue.
-
-    !["The table mapping dialog is displayed"](../media/03-adf_correcttable.jpg "Select the FoodCollection container")
-
-1. There is no need to change any `Settings`. Select **next**.
-
-    !["The settings dialog is displayed"](../media/03-adf_settings.jpg "Review the dialog, select next")
-
-1. Select **Next** to begin deployment After deployment is complete, select **Monitor**.
-
-    !["The pipeline runs are displayed"](../media/03-adf_progress.jpg "Notice the pipeline is In progress")
-
-1. After a few minutes, refresh the page and the status for the ImportNutrition pipeline should be listed as **Succeeded**.
-
-    !["The pipeline runs are displayed"](../media/03-adf_progress_complete.jpg "The pipeline has succeeded")
-
-1. Once the import process has completed, close the ADF. You will now proceed to validate your imported data.
+8. Review the pipeline settings and click **Finish** to start the data copy operation. Monitor the progress until completion.
+   ![alt text](image-8.png)
+   ![alt text](image-5.png)
 
 ## Validate Imported Data
 

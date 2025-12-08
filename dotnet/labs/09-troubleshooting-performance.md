@@ -4,6 +4,51 @@ In this lab, you will use the .NET SDK to tune Azure Cosmos DB requests to optim
 
 > If this is your first lab and you have not already completed the setup for the lab content see the instructions for [Account Setup](00-account_setup.md) before starting this lab.
 
+## Create the FinancialDatabase and Containers
+
+Before starting this lab, you need to create the database and containers for the financial data.
+
+1. In the Azure Portal, navigate to your Azure Cosmos DB account.
+
+2. From within the **Azure Cosmos DB** blade, select the **Data Explorer** tab on the left.
+
+3. At the top of the **Data Explorer** section, select **New Database**.
+
+4. In the **New Database** pane on the right, enter the following values:
+
+   - **Database id**: Enter `FinancialDatabase`
+   - **Throughput**: Select **Manual** and leave at default
+
+5. Select **OK** to create the database.
+
+6. Now create the first container. Expand the **FinancialDatabase** database, then select the **...** (more options) button next to it.
+
+7. Select **New Container**.
+
+8. In the **New Container** pane on the right, enter the following values:
+
+   - **Database id**: Select **Use existing** and choose `FinancialDatabase`
+   - **Container id**: Enter `PeopleCollection`
+   - **Partition key**: Enter `/accountHolder/LastName`
+   - **Throughput**: Select **Manual** and enter `400` RU/s
+
+9. Select **OK** to create the container.
+
+   > **Note**: The partition key `/accountHolder/LastName` is used because the Member objects store a Person object in the `accountHolder` property, and Person objects from the Bogus library have a `LastName` property.
+
+10. Create the second container. Select the **...** (more options) button next to **FinancialDatabase** again.
+
+11. Select **New Container** and enter the following values:
+
+    - **Database id**: Select **Use existing** and choose `FinancialDatabase`
+    - **Container id**: Enter `TransactionCollection`
+    - **Partition key**: Enter `/costCenter`
+    - **Throughput**: **IMPORTANT** - Select **Manual** (NOT Autoscale) and enter `400` RU/s
+
+12. Select **OK** to create the container.
+
+    > **Critical Note**: You must create `TransactionCollection` with **Manual** throughput set to exactly **400 RU/s**. This low throughput setting is required for the "Troubleshooting Requests" section later in this lab, where you will observe throttling behavior (HTTP 429 errors). If you accidentally create the container with Autoscale or higher throughput, you will need to delete and recreate it with Manual 400 RU/s before proceeding with the throttling exercises.
+
 ## Create a .NET Core Project
 
 1. On your local machine, locate the CosmosLabs folder in your Documents folder and open the `Lab09` folder that will be used to contain the content of your .NET Core project.
@@ -368,15 +413,13 @@ Azure Cosmos DB returns various response headers that can give you more metadata
 
 First, you will use the .NET SDK to issue request beyond the assigned capacity for a container. Request unit consumption is evaluated at a per-second rate. For applications that exceed the provisioned request unit rate, requests are rate-limited until the rate drops below the provisioned throughput level. When a request is rate-limited, the server preemptively ends the request with an HTTP status code of `429 RequestRateTooLargeException` and returns the `x-ms-retry-after-ms` header. The header indicates the amount of time, in milliseconds, that the client must wait before retrying the request. You will observe the rate-limiting of your requests in an example application.
 
-### Reducing R/U Throughput for a Container
+### Verify R/U Throughput for TransactionCollection
 
 1. In the **Data Explorer** section, expand the **FinancialDatabase** database node, expand the **TransactionCollection** node, and then select the **Scale & Settings** option.
 
-1. In the **Settings** section, locate the **Throughput** field and update it's value to **400**.
+1. In the **Settings** section, verify that the **Throughput** is set to **Manual** mode with **400 RU/s**.
 
-    > This is the minimum throughput that you can allocate to a container.
-
-1. Select the **Save** button at the top of the section to persist your new throughput allocation.
+    > **Note**: If you see the container is set to **Autoscale** or has a higher throughput, you will need to delete and recreate the `TransactionCollection` with Manual 400 RU/s as specified in the "Create the FinancialDatabase and Containers" section at the beginning of this lab. The 400 RU/s setting is the minimum throughput for a container and is necessary to observe throttling behavior in the following exercises.
 
 ### Observing Throttling (HTTP 429)
 
@@ -1313,10 +1356,13 @@ Many applications have workloads that vary over time in a predictable way. For e
     ```
 
     > Although the overall minimum throughput that can be set is 400 RU/s, specific containers or databases may have higher limits depending on size of stored data, previous maximum throughput settings, or number of containers in a database. Trying to set a value below the available minimum will cause an exception here. The current allowed minimum value can be found on the **ThroughputResponse.MinThroughput** property.
+    
+    > **Important**: Your `PeopleCollection` may show a minimum throughput of **1000 RU/s or higher** instead of 400 RU/s. This is normal and demonstrates a key concept: minimum throughput increases based on your container's data size and usage history. Always check the `MinThroughput` property before scaling down.
 
-1. Add the following code to update the RU/s setting for the container then print out the updated RU/s for the container:
+1. Add the following code to update the RU/s setting for the container then print out the updated RU/s for the container. **Note**: Adjust the throughput value to match or exceed your container's minimum (use the value from `MinThroughput` above):
 
     ```csharp
+    // Use your actual minimum throughput value here (e.g., 1000 if that's your minimum)
     await peopleContainer.ReplaceThroughputAsync(1000);
     throughput = await peopleContainer.ReadThroughputAsync();
     await Console.Out.WriteLineAsync($"New Throughput {throughput} RU/s");
