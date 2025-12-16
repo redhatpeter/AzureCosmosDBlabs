@@ -155,7 +155,7 @@ All Azure Cosmos DB operations within a stored procedure are asynchronous and de
     }
     ```
 
-    > This stored procedure will use the **console.log** feature that's normally used in browser-based JavaScript to write output to the console. In the context of Azure Cosmos DB, this feature can be used to capture diagnostics logging information that can be returned after the stored procedure is executed.
+    > This stored procedure demonstrates **console.log** for diagnostics. The log statements track execution flow through both the main procedural code and the asynchronous callback. This helps visualize how JavaScript's asynchronous operations work in Cosmos DB stored procedures.
 
 1. Select the **Save** button at the top of the tab.
 
@@ -181,7 +181,11 @@ All Azure Cosmos DB operations within a stored procedure are asynchronous and de
 
 1. Select the `console.log` link in the **Result** pane to view the log data for your stored procedure execution.
 
-    > You can see that the procedural components of the stored procedure finished first and then the callback function was executed once the item was created. This can help you understand the asynchronous nature of JavaScript callbacks.
+    > The log output reveals the execution order:
+    > ```
+    > procedural-start → metadata-retrieved → async-doc-creation-started → procedural-end → callback-started
+    > ```
+    > Notice that all the **main procedural code executes first** (synchronously), then the **callback function executes after** the item is created (asynchronously). This demonstrates JavaScript's non-blocking execution model - the `createDocument()` operation doesn't block the main code flow.
 
 ### Create Stored Procedure with Callback Functions
 
@@ -226,7 +230,27 @@ All Azure Cosmos DB operations within a stored procedure are asynchronous and de
 
 1. In the **Result** pane at the bottom of the tab, observe that the stored procedure execution has failed.
 
-    > Stored procedures are bound to a specific partition key. In this example, we tried to execute the stored procedure within the context of the **Packaged Foods** partition key. Within the stored procedure, we tried to create a new item using the **My Recipes** partition key. The stored procedure was unable to create a new item (or access existing items) in a partition key other than the one specified when the stored procedure is executed. This caused the stored procedure to fail. You are not able to create or manipulate items across partition keys within a stored procedure.
+    > **Critical Concept: Partition Key Boundaries in Stored Procedures**
+    > 
+    > The execution failed with an error similar to:
+    > ```
+    > "Requests originating from scripts cannot reference partition keys other than 
+    > the one for which the client request was submitted."
+    > ```
+    > 
+    > **Why it failed:**
+    > - Stored procedure was executed in the `"Packaged Foods"` partition (specified in execution parameters)
+    > - The code tried to create a document with `"foodGroup": "My Recipes"` (different partition!)
+    > - **Stored procedures are bound to a single partition** at execution time
+    > 
+    > **The Rule:** Within a stored procedure, you can ONLY:
+    > - ✅ Create, read, update, or delete items in the **same partition** as the execution context
+    > - ❌ Access items in **any other partition**
+    > 
+    > This constraint exists because:
+    > - All operations in a stored procedure are part of an **ACID transaction**
+    > - Transactions can only span items within the **same logical partition**
+    > - This enables Cosmos DB's horizontal scaling (partitions are independent and distributed)
 
 1. Select the **Execute** button at the top of the tab.
 
@@ -246,7 +270,12 @@ All Azure Cosmos DB operations within a stored procedure are asynchronous and de
 
 1. In the **Result** pane at the bottom of the tab, observe the results of the stored procedure's execution.
 
-    > You should see a new item in your container. Azure Cosmos DB has assigned additional fields to the item such as ``id`` and ``_etag``.
+    > **Success!** This time the stored procedure executed successfully because:
+    > - Execution partition: `"Packaged Foods"` (specified in parameters)
+    > - Document partition key: `"foodGroup": "Packaged Foods"` (matches!)
+    > - Both the execution context and the document being created are in the **same partition**
+    > 
+    > Azure Cosmos DB assigned additional fields like `id` and `_etag` to the newly created item. This demonstrates the correct pattern for stored procedure operations - all data manipulation must occur within the partition boundary specified at execution time.
 
 1. Select the **New SQL Query** button at the top of the **Data Explorer** section.
 
@@ -305,7 +334,7 @@ All Azure Cosmos DB operations within a stored procedure are asynchronous and de
     }
     ```
 
-    > This stored procedure uses nested callbacks to create two separate items. You may have scenarios where your data is split across multiple JSON documents and you will need to add or modify multiple items in a single stored procedure.
+    > This stored procedure creates **two related items** using nested callbacks. Both items use the **same partition key** (`foodGroupName`), ensuring they can be created within a single transaction. This pattern is useful when your data model splits related information across multiple documents that need to be created atomically (all-or-nothing).
 
 1. Select the **Save** button at the top of the tab.
 
@@ -327,7 +356,7 @@ All Azure Cosmos DB operations within a stored procedure are asynchronous and de
 
 1. In the **Result** pane at the bottom of the tab, observe the results of the stored procedure's execution.
 
-    > You should see new items in your container. Azure Cosmos DB has assigned additional fields to the items such as `id` and `_etag`.
+    > **Success! Both items created.** The stored procedure successfully created two separate documents because both use the same partition key value (`Vitamins`). This demonstrates a valid multi-document transaction pattern within a single partition.
 
 1. Replace the contents of the stored procedure editor with the following JavaScript code:
 
@@ -366,11 +395,31 @@ All Azure Cosmos DB operations within a stored procedure are asynchronous and de
     }
     ```
 
-    - Transactions are deeply and natively integrated into Cosmos DB’s JavaScript programming model.
-    - Inside a JavaScript function, all operations are automatically wrapped under a single transaction.
-    - If the JavaScript completes without any exception, the operations to the database are committed.
+    > **Understanding Automatic Transaction Rollback**
+    > 
+    > Notice the key change in this version:
+    > ```javascript
+    > var secondItem = {
+    >     foodGroup: foodGroupName + "_meal",  // Different partition key!
+    >     eaten: { meal: mealName }
+    > };
+    > ```
+    > 
+    > **What will happen:**
+    > - First item will be created successfully with `foodGroup: "Junk Food"`
+    > - Second item attempts to use `foodGroup: "Junk Food_meal"` (different partition!)
+    > - This violates the partition boundary constraint
+    > - An exception is thrown
+    > - **Cosmos DB automatically rolls back the entire transaction**
+    > 
+    > **Key Concepts:**
+    > - Transactions are deeply integrated into Cosmos DB's JavaScript runtime
+    > - All operations in a stored procedure are automatically wrapped in a **single ACID transaction**
+    > - If the JavaScript completes **without exception**, operations are **committed**
+    > - If **any exception** is thrown, the **entire transaction is rolled back**
+    > - This ensures atomicity: either all operations succeed, or none do
 
-We are going to change the stored procedure to put in a different foodGroup name for the second item. This should cause the stored procedure to fail since the second item uses a different partition key. If there is any exception that’s propagated from the script, Cosmos DB’s JavaScript runtime will roll back the whole transaction. This will effectively ensure that the first or second items are not committed to the database.
+We are going to test this transaction rollback behavior. The stored procedure will attempt to create two items with different partition keys, causing a failure that triggers automatic rollback.
 
 1. Select the **Update** button at the top of the tab.
 
@@ -392,7 +441,15 @@ We are going to change the stored procedure to put in a different foodGroup name
 
 1. In the **Result** pane at the bottom of the tab, observe that the stored procedure execution has failed.
 
-    > This stored procedure failed to create the second item so the entire transaction was rolled back.
+    > **Transaction Rollback Confirmed**
+    > 
+    > The stored procedure failed because:
+    > 1. First item (`"Junk Food"`) was successfully created
+    > 2. Second item attempted to use `"Junk Food_meal"` as partition key
+    > 3. Exception was thrown due to partition boundary violation
+    > 4. **Both items were rolled back** - neither exists in the database
+    > 
+    > Even though the first `console.log('Created: ' + newFirstItem.id)` would have executed, the entire transaction was undone. This is the power of automatic transaction management in Cosmos DB stored procedures.
 
 1. Select the **New SQL Query** button at the top of the **Data Explorer** section.
 
@@ -402,7 +459,12 @@ We are going to change the stored procedure to put in a different foodGroup name
     SELECT * FROM foods WHERE foods.foodGroup = "Junk Food"
     ```
 
-    > This query won't retrieve any items since the transaction was rolled back.
+    > **Verifying the Rollback:** This query searches for items with `"foodGroup": "Junk Food"`. If the transaction rollback worked correctly, you should see an **empty result set** `[]` because:
+    > - The first item was created during the stored procedure execution
+    > - But when the second item failed, the entire transaction was rolled back
+    > - Neither the first nor second item persisted in the database
+    > 
+    > This proves that stored procedures provide true ACID transaction guarantees within a single partition.
 
 1. Select the **Execute Query** button in the query tab to run the query. You should see only an empty array.
 

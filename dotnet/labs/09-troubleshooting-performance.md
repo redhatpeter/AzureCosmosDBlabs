@@ -397,7 +397,7 @@ Azure Cosmos DB returns various response headers that can give you more metadata
 
 1. Select the **Execute Query** button in the query tab to run the query.
 
-    > This query will fail immediately since this property is not indexed. Keep in mind when defining indexes that only indexed properties can be used in query conditions.
+    > This query will fail immediately because the `/relatives/Spouse/FirstName` path has been excluded from the index. Azure Cosmos DB requires properties used in ORDER BY clauses to be indexed. Remember: when you exclude a path from indexing, you cannot use that property in query operations that require an index, such as ORDER BY, filtering with range operators, or certain JOIN conditions.
 
 1. Return to the currently open **Visual Studio Code** editor containing your .NET Core project.
 
@@ -407,11 +407,27 @@ Azure Cosmos DB returns various response headers that can give you more metadata
     dotnet run
     ```
 
-1. Observe the results of the console project. You should see a difference in the number of  RU/s (~26 RU/s vs ~48 RU/s previously) required to create this item. This is due to the indexer skipping the paths you excluded.
+1. Observe the results of the console project. You should see a significant reduction in RU/s consumption (~26 RU/s compared to ~48 RU/s previously) required to create this item. This represents approximately a **48% reduction** in write costs. The savings occur because Azure Cosmos DB no longer needs to index the `/relatives/*` path, which contains the large nested objects (spouse and 4 children). By excluding this path from the index, you've reduced the index maintenance overhead during write operations while still maintaining the ability to query for the existence of the `relatives` property using `IS_DEFINED()`.
 
 ## Troubleshooting Requests
 
-First, you will use the .NET SDK to issue request beyond the assigned capacity for a container. Request unit consumption is evaluated at a per-second rate. For applications that exceed the provisioned request unit rate, requests are rate-limited until the rate drops below the provisioned throughput level. When a request is rate-limited, the server preemptively ends the request with an HTTP status code of `429 RequestRateTooLargeException` and returns the `x-ms-retry-after-ms` header. The header indicates the amount of time, in milliseconds, that the client must wait before retrying the request. You will observe the rate-limiting of your requests in an example application.
+In this section, you will use the .NET SDK to intentionally exceed the provisioned throughput capacity of a container to observe throttling behavior. Azure Cosmos DB evaluates Request Unit (RU) consumption on a **per-second basis**. When your application sends requests that consume more RU/s than the provisioned amount, Azure Cosmos DB **rate-limits** (throttles) those requests to protect the service and ensure fair resource allocation.
+
+**How Throttling Works:**
+
+When rate-limiting occurs, Azure Cosmos DB:
+1. **Rejects the request immediately** with an HTTP status code of **`429 RequestRateTooLargeException`**
+2. **Returns the `x-ms-retry-after-ms` header**, indicating how many milliseconds the client should wait before retrying
+3. **Continues throttling** until the request rate drops below the provisioned throughput level
+
+**Real-World Example:**
+
+Imagine your `TransactionCollection` is provisioned with **400 RU/s**. If your application attempts to create 5,000 items simultaneously in parallel:
+- Each item creation might cost ~5 RU
+- Total demand: ~25,000 RU in 1-2 seconds
+- **Result**: Many requests will receive HTTP 429 errors because you're consuming RU/s far faster than the 400 RU/s capacity
+
+In the following exercises, you will intentionally trigger this throttling behavior by creating thousands of items in parallel against a container with only 400 RU/s provisioned. This will help you understand how to identify and handle throttling in production applications.
 
 ### Verify R/U Throughput for TransactionCollection
 
@@ -764,7 +780,15 @@ You will now tune your requests to Azure Cosmos DB by manipulating the SQL query
      string sql = "SELECT c.id FROM c";
      ```
 
-     > This new query does not filter the result set, and only returns part of the documents.
+     > **Understanding the RU difference between `SELECT * FROM c` and `SELECT c.id FROM c`:**
+     > 
+     > While both queries perform a full container scan without filtering, they differ slightly in cost:
+     > 
+     > - **`SELECT * FROM c`**: Returns entire documents with all properties. The query engine reads and transfers complete items.
+     > 
+     > - **`SELECT c.id FROM c`**: Returns only the `id` property from each document. Although this requires property projection (extracting specific fields), the **reduced data transfer size** results in slightly lower RU consumption.
+     > 
+     > **Key Insight**: For queries without filters or ORDER BY clauses, selecting fewer properties typically reduces RU charges because the savings from transferring less data over the network outweigh any projection overhead. However, the difference is minimal (typically less than 1 RU) for simple queries on small result sets. The real RU savings from projection become more significant with larger result sets or when selecting a small subset of properties from documents with many fields.
 
 1. Save all of your open editor tabs.
 
@@ -774,14 +798,14 @@ You will now tune your requests to Azure Cosmos DB by manipulating the SQL query
     dotnet run
     ```
 
-1. Observe the output of the console application. This should be about ~22 RU/s. While the payload returned is much smaller, the RU/s is slightly higher because the query engine did work to return the specific property.
+1. Observe the output of the console application. You should see the RU charge is very similar to `SELECT *` (~21-22 RU/s range), with potentially a slight reduction due to the smaller payload being transferred.
 
 ### Managing SDK Query Options
 
-1. Locate the `CreateTransactions` method and delete the code added for the previous section so it again looks like this:
+1. Locate the `CreateTransactions2` method and delete the code added for the previous section so it again looks like this:
 
     ```csharp
-    private static async Task QueryTransactions(Container transactionContainer)
+    private static async Task QueryTransactions2(Container transactionContainer)
     {
 
     }
@@ -860,7 +884,7 @@ You will now tune your requests to Azure Cosmos DB by manipulating the SQL query
 1. The `QueryTransactions` method should now look like this:
 
     ```csharp
-    private static async Task QueryTransactions(Container transactionContainer)
+    private static async Task QueryTransactions2(Container transactionContainer)
     {
         int maxItemCount = 100;
         int maxDegreeOfParallelism = 1;
@@ -967,7 +991,22 @@ You will now tune your requests to Azure Cosmos DB by manipulating the SQL query
     int maxDegreeOfParallelism = -1;
     ```
 
-    > Parallel query works by querying multiple partitions in parallel. However, data from an individual partitioned container is fetched serially with respect to the query setting the `maxBufferedItemCount` property to a value of `-1` effectively tells the SDK to manage this setting. Setting the **MaxDegreeOfParallelism** to the number of partitions has the maximum chance of achieving the most performant query, provided all other system conditions remain the same.
+    > **Understanding MaxDegreeOfParallelism optimization:**
+    > 
+    > Setting `MaxDegreeOfParallelism` to `-1` allows the Azure Cosmos DB SDK to automatically determine the optimal degree of parallelism based on your container's partition count. This is particularly beneficial for cross-partition queries like ORDER BY operations.
+    > 
+    > **How Parallel Query Works:**
+    > - The SDK queries multiple partitions **simultaneously** to improve throughput
+    > - Data from each individual partition is still fetched **serially** (one page at a time per partition)
+    > - The SDK coordinates results across partitions to satisfy the query requirements
+    > 
+    > **Performance Impact:**
+    > Based on your test results, you may observe that the performance improvement from `MaxDegreeOfParallelism = 5` (22.03s) to `MaxDegreeOfParallelism = -1` (21.97s) is minimal. This is because:
+    > - Your container may have a similar number of partitions (~5)
+    > - Network latency and client-side processing become the bottleneck
+    > - The query is already well-optimized with `MaxBufferedItemCount = -1`
+    > 
+    > **Best Practice:** Use `-1` to let the SDK automatically scale parallelism as your container grows and partitions increase over time, ensuring optimal performance without code changes.
 
 1. Save all of your open editor tabs.
 
@@ -979,7 +1018,7 @@ You will now tune your requests to Azure Cosmos DB by manipulating the SQL query
 
 1. Observe the output of the console application.
 
-    > Again, this should have a slight impact on your performance time.
+    > You should see execution time similar to the previous run (~21-22 seconds). The performance is comparable because the SDK was already using near-optimal parallelism at `5`, and auto-tuning to `-1` provides flexibility for future partition growth rather than immediate dramatic improvement.
 
 1. Back in the code editor tab, locate the following line of code:
 
@@ -1005,7 +1044,7 @@ You will now tune your requests to Azure Cosmos DB by manipulating the SQL query
 
 1. Observe the output of the console application.
 
-    > You will notice that the query performance improved dramatically. This may be an indicator that our query was bottlenecked by the client computer.
+    > You will notice that the query performance improved **dramatically** from ~22 seconds down to ~8 seconds. This represents a **64% reduction** in query execution time simply by increasing the page size from 100 to 500 items. The significant improvement indicates that the query was bottlenecked by network round-trips between the client and Cosmos DB. With larger page sizes, fewer round-trips are needed to retrieve all results.
 
 1. Back in the code editor tab, locate the following line of code:
 
@@ -1019,7 +1058,7 @@ You will now tune your requests to Azure Cosmos DB by manipulating the SQL query
     int maxItemCount = 1000;
     ```
 
-    > For large queries, it is recommended that you increase the page size up to a value of 1000.
+    > For large queries, increasing the page size to 1,000 items can further reduce network round-trips and improve performance.
 
 1. Save all of your open editor tabs.
 
@@ -1031,7 +1070,7 @@ You will now tune your requests to Azure Cosmos DB by manipulating the SQL query
 
 1. Observe the output of the console application.
 
-    > By increasing the page size, you have sped up the query even more.
+    > The query execution time dropped to approximately **7.76 seconds**, representing another modest improvement (3% faster than 500 items/page, 65% faster than the original 100 items/page baseline). The diminishing returns indicate we're approaching an optimal balance where fewer round-trips meet practical limits.
 
 1. Back in the code editor tab, locate the following line of code:
 
@@ -1057,7 +1096,33 @@ You will now tune your requests to Azure Cosmos DB by manipulating the SQL query
 
 1. Observe the output of the console application.
 
-    > In most cases, this change will decrease your query time by a small amount.
+    > With MaxBufferedItemCount set to 50,000 and MaxItemCount at 1,000, the query execution time reached approximately **7.12 seconds**. This represents the best performance yet—a **67.6% improvement** over the original baseline of 21.97 seconds with 100 items/page.
+
+#### Key Takeaways: Page Size Optimization
+
+The MaxItemCount tuning revealed a dramatic performance improvement that far exceeded the gains from parallelism optimization:
+
+**Performance Progression:**
+- **MaxItemCount = 100 (baseline)**: 21.97 seconds
+- **MaxItemCount = 500**: 8.04 seconds (63% faster)
+- **MaxItemCount = 1000**: 7.76 seconds (65% faster)
+- **MaxItemCount = 50000 + Buffer tuning**: 7.12 seconds (67.6% faster)
+
+**Why Page Size Had Dramatic Impact (vs. Minimal Parallelism Impact):**
+
+The 67% performance improvement from increasing MaxItemCount reveals that the **client-side round-trip overhead** was the primary bottleneck, not server-side query execution:
+
+1. **Round-Trip Reduction**: With 100 items/page, retrieving 50,000 items requires ~500 network round-trips. At 1,000 items/page, only ~50 round-trips are needed. Each round-trip incurs network latency plus client processing overhead.
+
+2. **Client Bottleneck Revealed**: The massive improvement shows that the client computer was spending most of its time waiting for network responses rather than processing data. In contrast, the minimal improvement from MaxDegreeOfParallelism (3-4%) indicated the server was already efficiently distributing work across the ~5 physical partitions.
+
+3. **Best Practices for Page Size Selection**:
+   - For large result sets (1000+ items), use MaxItemCount values of 1,000 or higher to minimize round-trips
+   - For small result sets or UI pagination, smaller page sizes (50-100) are appropriate
+   - Monitor both query execution time and RU consumption when tuning—larger pages reduce time but don't significantly impact RU charges
+   - The optimal page size balances network efficiency with client memory constraints
+
+4. **Complementary Optimizations**: Combining large page sizes with MaxBufferedItemCount allows the SDK to pre-fetch subsequent pages while processing current results, further reducing perceived latency.
 
 ### Reading and Querying Items
 
@@ -1211,7 +1276,12 @@ You will now tune your requests to Azure Cosmos DB by manipulating the SQL query
 
 1. Observe the output of the console application.
 
-    > You should see that it took fewer RU/s (1 RU/s vs ~3 RU/s) to obtain the item directly if you have the item's id and partition key value. The reason why this is so efficient is that ReadItemAsync() bypasses the query engine entirely and goes directly to the backend store to retrieve the item. A read of this type for 1 KB of data or less will always cost 1 RU/s.
+    > You should see that the direct read consumed significantly fewer RUs—**1 RU** compared to **~2.82 RUs** for the query. This ~2.8x efficiency gain demonstrates why **ReadItemAsync()** is the preferred method when you have both the item's `id` and partition key value:
+    >
+    > - **Query approach** (`SELECT TOP 1 * FROM c WHERE c.id = '...'`): **2.82 RUs** — The query engine must parse the SQL, create an execution plan, and search the partition even though the id is unique.
+    > - **Direct read approach** (`ReadItemAsync(id, partitionKey)`): **1 RU** — Bypasses the query engine entirely and goes directly to the backend store to retrieve the item by its unique coordinates.
+    >
+    > A direct read of 1 KB of data or less will always cost exactly **1 RU**, making it the most efficient way to retrieve a single item when you have its id and partition key.
 
 ## Setting Throughput for Expected Workloads
 
@@ -1303,11 +1373,43 @@ Using appropriate RU/s settings for container or database throughput can allow y
 
 1. Observe the output of the console application.
 
-    > You should see the total throughput needed for our application based on our estimates. This can then be used to guide how much throughput to provision for the application. To get the most accurate estimate for RU/s needs for your applications, you can follow the same pattern to estimate RU/s needs for every operation in your application multiplied by the number of those operations you expect per second. Alternatively you can use the Metrics tab in the portal to measure average throughput.
+    > Based on your test results, the application will require approximately **10,780 RU/s** of throughput capacity:
+    >
+    > - **Expected writes per second**: 200
+    > - **Expected reads per second**: 800
+    > - **Write cost**: 49.9 RU (creating a member document)
+    > - **Read cost**: 1 RU (direct read with id and partition key)
+    > - **Estimated load**: (49.9 × 200) + (1 × 800) = **10,780 RU/s**
+    >
+    > This calculation demonstrates how to size your Cosmos DB throughput for expected workloads. To get the most accurate estimate for RU/s needs for your applications, follow the same pattern: measure the RU cost for each operation type, multiply by the expected frequency per second, and sum across all operations. Alternatively, you can use the **Metrics** tab in the Azure portal to measure actual average throughput for existing applications.
 
 ### Adjusting for Usage Patterns
 
-Many applications have workloads that vary over time in a predictable way. For example, business applications that have a heavy workload during a 9-5 business day but minimal usage outside of those hours. Cosmos throughput settings can also be varied to match this type of usage pattern.
+Many applications have workloads that vary over time in a predictable way. Programmatically adjusting throughput allows you to optimize costs while maintaining performance.
+
+**When to use programmatic throughput adjustment:**
+
+1. **Time-based workload patterns**:
+   - Business applications with heavy workload during business hours (9-5) but minimal usage overnight
+   - E-commerce sites with peak traffic during sales events or holiday seasons
+   - Reporting systems that process batches at specific times (end of day, monthly)
+
+2. **Event-driven scaling**:
+   - Data migration operations requiring temporary throughput increases
+   - Batch processing jobs that need higher throughput during execution
+   - Scheduled maintenance windows requiring reduced throughput
+
+3. **Cost optimization strategies**:
+   - Scale down during known low-traffic periods to reduce costs
+   - Scale up proactively before anticipated load increases
+   - Respond to monitoring alerts when approaching RU limits
+
+4. **When NOT to use programmatic adjustment**:
+   - For unpredictable, rapidly changing workloads → Use **autoscale** instead
+   - For steady-state workloads → Use fixed **manual** throughput
+   - When you need instant scaling → Autoscale responds faster than programmatic changes
+
+**Important**: Throughput changes take time to propagate (typically seconds to minutes depending on scale). Plan adjustments ahead of anticipated load changes rather than reacting in real-time. For automatic, immediate scaling, configure **autoscale throughput** instead of manual programmatic adjustments.
 
 1. Locate the `Main` method and comment out the last line and add a new line `await UpdateThroughput(peopleContainer);` so it looks like this:
 
@@ -1373,18 +1475,36 @@ Many applications have workloads that vary over time in a predictable way. For e
     ```csharp
     private static async Task UpdateThroughput(Container peopleContainer)
     {
-        int? throughput = await peopleContainer.ReadThroughputAsync();
-        await Console.Out.WriteLineAsync($"Current Throughput {throughput} RU/s");
-
-        ThroughputResponse throughputResponse = await container.ReadThroughputAsync(new RequestOptions());
-        int? minThroughput = throughputResponse.MinThroughput;
-        await Console.Out.WriteLineAsync($"Minimum Throughput {minThroughput} RU/s");
-
-        await peopleContainer.ReplaceThroughputAsync(1000);
-        throughput = await peopleContainer.ReadThroughputAsync();
-        await Console.Out.WriteLineAsync($"New Throughput {throughput} RU/s");
+        ThroughputResponse response = await peopleContainer.ReadThroughputAsync(new RequestOptions());
+        
+        // Check if autoscale is enabled
+        if (response.Resource.AutoscaleMaxThroughput.HasValue)
+        {
+            await Console.Out.WriteLineAsync($"Current: Autoscale with max {response.Resource.AutoscaleMaxThroughput} RU/s");
+            await Console.Out.WriteLineAsync($"Minimum allowed: {response.MinThroughput} RU per sec");
+            
+            // To change autoscale throughput, use autoscale settings
+            ThroughputProperties autoscaleProperties = ThroughputProperties.CreateAutoscaleThroughput(4000);
+            ThroughputResponse newResponse = await peopleContainer.ReplaceThroughputAsync(autoscaleProperties);
+            await Console.Out.WriteLineAsync($"New Throughput: Autoscale with max {newResponse.Resource.AutoscaleMaxThroughput} RU/s");
+        }
+        else
+        {
+            // Manual throughput
+            int? current = response.Resource.Throughput;
+            await Console.Out.WriteLineAsync($"{current} RU per sec");
+            await Console.Out.WriteLineAsync($"Minimum allowed: {response.MinThroughput} RU per sec");
+            
+            // Update to a new manual throughput value
+            await peopleContainer.ReplaceThroughputAsync(1000);
+            ThroughputResponse newResponse = await peopleContainer.ReadThroughputAsync(new RequestOptions());
+            int? newThroughput = newResponse.Resource.Throughput;
+            await Console.Out.WriteLineAsync($"New Throughput {newThroughput} RU/s");
+        }
     }
     ```
+
+    > This method handles both **autoscale** and **manual** throughput modes. Autoscale containers require using `ThroughputProperties.CreateAutoscaleThroughput()` to update the maximum throughput, while manual containers use `ReplaceThroughputAsync()` with a fixed RU/s value.
 
 1. Save all of your open editor tabs.
 
@@ -1396,13 +1516,31 @@ Many applications have workloads that vary over time in a predictable way. For e
 
 1. Observe the output of the console application.
 
-    > You should see the initial provisioned value before changing to **1000**.
+    > Your output will depend on whether your container uses **autoscale** or **manual** throughput:
+    >
+    > **Autoscale example:**
+    > ```
+    > Current: Autoscale with max 1000 RU/s
+    > Minimum allowed: 1000 RU per sec
+    > New Throughput: Autoscale with max 4000 RU/s
+    > ```
+    >
+    > **Manual throughput example:**
+    > ```
+    > 400 RU per sec
+    > Minimum allowed: 400 RU per sec
+    > New Throughput 1000 RU/s
+    > ```
+    >
+    > The output shows the initial provisioned throughput before and after the update. Autoscale containers display the maximum RU/s, while manual containers show the fixed RU/s allocation.
 
 1. In the **Azure Cosmos DB** blade, locate and select the **Data Explorer** link on the left side of the blade.
 
 1. In the **Data Explorer** section, expand the **FinancialDatabase** database node, expand the **PeopleCollection** node, and then select the **Scale & Settings** option.
 
-1. In the **Settings** section, locate the **Throughput** field and note that is is now set to **1000**.
+1. In the **Settings** section, locate the **Throughput** field and verify the updated value:
+    - **Autoscale**: Maximum RU/s is now set to **4000**
+    - **Manual**: Fixed RU/s is now set to **1000**
 
 > Note that you may need to refresh the Data Explorer to see the new value.
 

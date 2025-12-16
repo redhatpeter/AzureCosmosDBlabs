@@ -73,7 +73,7 @@ Prior to starting these labs, you must have the following operating system and s
 
 ---
 
-### Java Labs
+<!-- ### Java Labs
 
 #### Java Lab Prerequisites
 
@@ -116,7 +116,7 @@ Java 8 JRE (or greater) | [/jre8-downloads](https://www.oracle.com/technetwork/j
 
 1. When installing the Java 11 SDK or higher, this is bundled with a Java Runtime Environment (JRE). Make sure the JRE path (e.g: C:\Program Files\Java\jdk-11.0.2\bin\) is present at the top of your Path variable in System variables.
 1. If you already have Java installed on your local machine, you should check the version of your Java Runtime Environment (JRE) installation using the ``java -version`` command.
-1. If using a version of Java greater than version 8, some projects may not compile (for example the benchmarking application).
+1. If using a version of Java greater than version 8, some projects may not compile (for example the benchmarking application). -->
 
 ---
 

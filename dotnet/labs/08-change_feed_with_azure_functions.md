@@ -434,6 +434,189 @@ In this exercise, we will implement .NET SDK's change feed processor library to 
 
 1. Your first Azure Function has now been created, in Visual Studio Code and note the new **ChangeFeedFunctions** folder, expand it and explore the **local.settings.json**, and the **MaterializedViewFunction.cs** files.
 
+## Common Issues and Troubleshooting
+
+### Azure AD Authentication vs. Key-Based Authentication
+
+**Issue**: When starting Azure Functions with `func host start`, you may encounter errors like:
+```
+"Local Authorization is disabled. Use an AAD token to authorize all requests"
+```
+
+**Root Cause**: Your Cosmos DB account has key-based authentication disabled (`disableLocalAuth: true`), but the CosmosDB trigger binding requires either:
+- A connection string with AccountKey (key-based auth), OR
+- Identity-based authentication support (which has limited local development support in Azure Functions v4)
+
+**Solution**: Temporarily enable key-based authentication for local development:
+
+```bash
+# Check current status
+az cosmosdb show --name <your-cosmos-account> --resource-group <your-rg> --query disableLocalAuth
+
+# Enable key-based auth (set disableLocalAuth to false)
+MSYS_NO_PATHCONV=1 az resource update \
+  --ids "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/<your-rg>/providers/Microsoft.DocumentDB/databaseAccounts/<your-cosmos-account>" \
+  --set properties.disableLocalAuth=false
+```
+
+> **Important**: For production deployments to Azure, you should use Managed Identity and re-enable `disableLocalAuth: true` for enhanced security.
+
+### CosmosDB Trigger Type Mismatch
+
+**Issue**: Runtime error when the function executes:
+```
+Unable to cast object of type 'System.String' to type 'System.Collections.Generic.IReadOnlyList`1[System.Object]'
+```
+
+**Root Cause**: The CosmosDB extension (v4.11.0 or v4.13.0) may pass change feed documents as a JSON string instead of a collection, depending on configuration.
+
+**Solution**: Change the trigger parameter type from `IReadOnlyList<dynamic>` to `string` and deserialize:
+
+```csharp
+[FunctionName("AnalyticsFunction")]
+public static async Task Run([CosmosDBTrigger(
+    databaseName: "StoreDatabase",
+    containerName: "CartContainer",
+    Connection = "CosmosDBAccountEndpoint",
+    CreateLeaseContainerIfNotExists = true,
+    LeaseContainerName = "analyticsLeases")]string input, ILogger log)
+{
+    if (!string.IsNullOrEmpty(input))
+    {
+        var documents = Newtonsoft.Json.JsonConvert.DeserializeObject<List<dynamic>>(input);
+        
+        if (documents != null && documents.Count > 0)
+        {
+            log.LogInformation($"Processing {documents.Count} document(s)");
+            // Process documents here
+        }
+    }
+}
+```
+
+### Azure Storage Emulator (Azurite) Not Running
+
+**Issue**: Functions fail to start with error:
+```
+"We couldn't reach the Table service endpoint...target machine actively refused it (127.0.0.1:10002)"
+```
+
+**Root Cause**: Azure Functions uses Azure Table Storage to manage lease containers for the Change Feed processor. The local emulator (Azurite) must be running.
+
+**Solution**: Install and start Azurite:
+
+```bash
+# Install Azurite globally
+npm install -g azurite
+
+# Start Azurite (in a separate terminal)
+azurite --silent --location c:/azurite --debug c:/azurite/debug.log
+```
+
+> **Note**: Keep Azurite running in a separate terminal window while testing Azure Functions locally.
+
+### Missing Configuration Dependencies
+
+**Issue**: Build or runtime errors about missing packages:
+```
+"Could not load file or assembly 'Microsoft.Extensions.Configuration.Abstractions, Version=8.0.0.0'"
+```
+
+**Solution**: Ensure all required packages are installed. Update your `.csproj` file to include:
+
+```xml
+<PackageReference Include="Azure.Identity" Version="1.17.1" />
+<PackageReference Include="Microsoft.Azure.Cosmos" Version="3.55.0" />
+<PackageReference Include="Microsoft.Azure.Functions.Extensions" Version="1.1.0" />
+<PackageReference Include="Microsoft.Azure.WebJobs.Extensions.CosmosDB" Version="4.13.0" />
+<PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
+```
+
+Then run:
+```bash
+dotnet restore
+```
+
+### Configuration File Issues
+
+**Issue**: Functions fail to index with errors about connection string format or missing configuration.
+
+**Solution**: Ensure `local.settings.json` is properly formatted:
+
+```json
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet",
+    "FUNCTIONS_INPROC_NET8_ENABLED": "1",
+    "CosmosDBAccountEndpoint": "AccountEndpoint=https://<your-account>.documents.azure.com:443/;AccountKey=<your-key>;"
+  }
+}
+```
+
+**Key Points**:
+- `AzureWebJobsStorage` must be set to `UseDevelopmentStorage=true` for local development
+- `CosmosDBAccountEndpoint` must be a full connection string with `AccountEndpoint` and `AccountKey`
+- `FUNCTIONS_INPROC_NET8_ENABLED` enables .NET 8 in-process support
+
+### Event Hub Connection Issues
+
+**Issue**: AnalyticsFunction fails with:
+```
+"Value for the connection string parameter name '<your-event-hub-connection>' was not found"
+```
+
+**Root Cause**: The Event Hub connection string placeholder hasn't been replaced, or you haven't set up Event Hub yet.
+
+**Solution (Option 1)**: Comment out Event Hub code temporarily:
+
+```csharp
+if (!string.IsNullOrEmpty(input))
+{
+    var documents = Newtonsoft.Json.JsonConvert.DeserializeObject<List<dynamic>>(input);
+    
+    if (documents != null && documents.Count > 0)
+    {
+        log.LogInformation($"Processing {documents.Count} document(s)");
+        
+        // Event Hub code commented out - configure Event Hub to enable
+        /*
+        var sbEventHubConnection = new EventHubsConnectionStringBuilder(_eventHubConnection) { EntityPath = _eventHubName };
+        var eventHubClient = EventHubClient.CreateFromConnectionString(sbEventHubConnection.ToString());
+        // ... rest of Event Hub code
+        */
+    }
+}
+```
+
+**Solution (Option 2)**: Set up Event Hub and replace the connection string placeholder with your actual Event Hub connection string.
+
+### Package Version Compatibility
+
+**Issue**: Build errors about package downgrades, especially with Microsoft.Azure.Cosmos:
+```
+"Detected package downgrade: Microsoft.Azure.Cosmos from 3.55.0 to 3.53.1"
+```
+
+**Solution**: The CosmosDB extension v4.13.0 requires Cosmos SDK 3.55.0 or higher. Update your `.csproj`:
+
+```xml
+<PackageReference Include="Microsoft.Azure.Cosmos" Version="3.55.0" />
+<PackageReference Include="Microsoft.Azure.WebJobs.Extensions.CosmosDB" Version="4.13.0" />
+```
+
+### Summary of Configuration Requirements
+
+For successful local Azure Functions development with Cosmos DB Change Feed:
+
+1. ✅ **Cosmos DB**: Temporarily enable key-based auth (`disableLocalAuth: false`)
+2. ✅ **Azurite**: Install and run Azure Storage Emulator
+3. ✅ **Packages**: Use correct versions (Cosmos 3.55.0, CosmosDB Extension 4.13.0)
+4. ✅ **Configuration**: Proper `local.settings.json` with connection string format
+5. ✅ **Trigger Parameters**: Use `string` type and deserialize, or use strongly-typed models
+6. ✅ **.NET Version**: Target .NET 8.0 with Azure Functions v4
+
 ## Use Cosmos DB Change Feed for the Materialized View Pattern
 
 The Materialized View pattern is used to generate pre-populated views of data in environments where the source data format is not well suited to the applications requirements. In this example, we'll create a real time collection of sales data aggregated by State that would allow another application to quickly retrieve summary sales data
@@ -450,10 +633,13 @@ The Materialized View pattern is used to generate pre-populated views of data in
      "Values": {
        "AzureWebJobsStorage": "UseDevelopmentStorage=true",
        "FUNCTIONS_WORKER_RUNTIME": "dotnet",
-       "DBConnection": "<your-db-connection-string>"
+       "FUNCTIONS_INPROC_NET8_ENABLED": "1",
+       "CosmosDBAccountEndpoint": "AccountEndpoint=https://<your-cosmos-account>.documents.azure.com:443/;AccountKey=<your-primary-key>;"
      }
    }
    ```
+
+   > **Important**: Replace `<your-cosmos-account>` with your Cosmos DB account name and `<your-primary-key>` with your primary key from the Azure Portal.
 
 1. Select the new `MaterializedViewFunction.cs` file to open it in the editor.
 
@@ -467,13 +653,13 @@ The Materialized View pattern is used to generate pre-populated views of data in
 
    > Cosmos DB Change Feeds are guaranteed to be in order within a partition, so in this case we want to use the Container where the partition is already set to the State, `CartContainerByState`, as our source
 
-1. Replace the **ConnectionStringSetting** parameter name with **Connection** and set the value to **DBConnection**
+1. Replace the **ConnectionStringSetting** parameter name with **Connection** and set the value to **CosmosDBAccountEndpoint**
 
    ```csharp
-   Connection = "DBConnection",
+   Connection = "CosmosDBAccountEndpoint",
    ```
 
-   > **Note**: In Azure Functions v4, `ConnectionStringSetting` is now `Connection`.
+   > **Note**: In Azure Functions v4, `ConnectionStringSetting` is now `Connection`. The value `CosmosDBAccountEndpoint` must match the key name in your `local.settings.json` file.
 
 1. Between **Connection** and **LeaseContainerName** add the following line:
 
@@ -498,14 +684,14 @@ The Materialized View pattern is used to generate pre-populated views of data in
    public static void Run([CosmosDBTrigger(
       databaseName: "StoreDatabase",
       containerName: "CartContainerByState",
-      Connection = "DBConnection",
+      Connection = "CosmosDBAccountEndpoint",
       CreateLeaseContainerIfNotExists = true,
       LeaseContainerName = "materializedViewLeases")]IReadOnlyList<dynamic> input, ILogger log)
    {
       if (input != null && input.Count > 0)
       {
          log.LogInformation("Documents modified " + input.Count);
-         log.LogInformation("First document Id " + input[0].Id);
+         log.LogInformation("First document Id " + input[0].id);
       }
    }
    ```
@@ -529,27 +715,29 @@ The Materialized View pattern is used to generate pre-populated views of data in
       public static async Task Run([CosmosDBTrigger(
          databaseName: "StoreDatabase",
          containerName: "CartContainerByState",
-         Connection = "DBConnection",
+         Connection = "CosmosDBAccountEndpoint",
          CreateLeaseContainerIfNotExists = true,
          LeaseContainerName = "materializedViewLeases")]IReadOnlyList<dynamic> input, ILogger log)
       {
          if (input != null && input.Count > 0)
          {
             log.LogInformation("Documents modified " + input.Count);
-            log.LogInformation("First document Id " + input[0].Id);
+            log.LogInformation("First document Id " + input[0].id);
          }
       }
    ```
 
-1. Your target this time is the container called **StateSales**. Add the following lines to the top of the **MaterializedViewFunction** to setup the destination connection. Be sure to replace the endpoint url and the key.
+1. Your target this time is the container called **StateSales**. Add the following lines to the top of the **MaterializedViewFunction** to setup the destination connection using Azure AD authentication:
 
    ```csharp
-    private static readonly string _endpointUrl = "<your-endpoint-url>";
-    private static readonly string _primaryKey = "<your-primary-key>";
-    private static readonly string _databaseId = "StoreDatabase";
-    private static readonly string _containerId = "StateSales";
-    private static CosmosClient _client = new CosmosClient(_endpointUrl, _primaryKey);
+   private static readonly string _endpointUrl = "https://<your-cosmos-account>.documents.azure.com:443/";
+   private static readonly string _tenantId = "<your-tenant-id>";
+   private static readonly string _databaseId = "StoreDatabase";
+   private static readonly string _containerId = "StateSales";
+   private static CosmosClient _client = new CosmosClient(_endpointUrl, new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = _tenantId }));
    ```
+
+   > **Note**: Replace `<your-cosmos-account>` with your Cosmos DB account name and `<your-tenant-id>` with your Azure AD tenant ID. Ensure you're logged in with `az login --tenant <your-tenant-id>` before running the function. Alternatively, you can use the connection string approach if key-based auth is enabled.
 
 ### Add a new Class for StateSales Data
 
@@ -1131,6 +1319,14 @@ With all of the configuration out of the way, you'll see how simple it is to wri
    ```
 
 ### Creating a Power BI Dashboard to Test the AnalyticsFunction
+
+1. Before starting, ensure **Azurite** is running. Open a terminal window and start Azurite:
+
+   ```bash
+   azurite --silent --location c:/azurite --debug c:/azurite/debug.log
+   ```
+
+   > **Important**: Keep Azurite running throughout the testing process. Azure Functions needs it for lease management.
 
 1. Once again, open three terminal windows.
 

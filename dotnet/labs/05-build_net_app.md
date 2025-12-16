@@ -108,20 +108,35 @@ ReadItemAsync allows a single item to be retrieved from Cosmos DB by its ID. In 
 
     > This query will select all food where the foodGroup is set to the value `Sweets`. It will also only select documents that have description, manufacturerName, and servings properties defined. You'll note that the syntax is very familiar if you've done work with SQL before. Also note that because this query has the partition key in the WHERE clause, this query can execute within a single partition.
 
-1. Add the following code to execute and read the results of this query
+1. Add the following code to execute and read the results of this query. Note that we're also tracking the Request Unit (RU) consumption to understand the query cost:
 
    ```csharp
-   FeedIterator<Food> queryA = container.GetItemQueryIterator<Food>(new QueryDefinition(sqlA), requestOptions: new QueryRequestOptions{MaxConcurrency = 1});
-   foreach (Food food in await queryA.ReadNextAsync())
+   FeedIterator<Food> queryA = container.GetItemQueryIterator<Food>(new QueryDefinition(sqlA), requestOptions: new QueryRequestOptions{MaxConcurrency = 1, PartitionKey = new PartitionKey("Sweets")});
+   
+   double totalRUForQueryA = 0;
+   while (queryA.HasMoreResults)
    {
-       await Console.Out.WriteLineAsync($"{food.Description} by {food.ManufacturerName}");
-       foreach (Serving serving in food.Servings)
+       FeedResponse<Food> response = await queryA.ReadNextAsync();
+       totalRUForQueryA += response.RequestCharge;
+       
+       foreach (Food food in response)
        {
-           await Console.Out.WriteLineAsync($"\t{serving.Amount} {serving.Description}");
+           await Console.Out.WriteLineAsync($"{food.Description} by {food.ManufacturerName}");
+           
+           if (food.Servings != null)
+           {
+               foreach (Serving serving in food.Servings)
+               {
+                   await Console.Out.WriteLineAsync($"\t{serving.Amount} {serving.Description}");
+               }
+           }
+           await Console.Out.WriteLineAsync();
        }
-       await Console.Out.WriteLineAsync();
    }
+   Console.Out.WriteLine($"\n>>> Single-Partition Query (sqlA) consumed {totalRUForQueryA:0.00} RUs\n");
    ```
+
+   > By accessing the `FeedResponse<T>` object directly, we can read the `RequestCharge` property to see how many RUs this query consumed. Single-partition queries are typically very efficient because they only need to scan one logical partition.
 
 1. Save all of your open tabs in Visual Studio Code
 
@@ -141,7 +156,11 @@ ReadItemAsync allows a single item to be retrieved from Cosmos DB by its ID. In 
         1 portion, amount to make 1/2 cup
 
     ...
+    
+    >>> Single-Partition Query (sqlA) consumed 2.83 RUs
     ```
+
+    > Notice the low RU consumption. Because this query includes the partition key (`foodGroup = 'Sweets'`) in the WHERE clause, Cosmos DB can execute it efficiently within a single partition.
 
 ### Execute a Query Against Multiple Azure Cosmos DB Partitions
 
@@ -159,21 +178,28 @@ ReadItemAsync allows a single item to be retrieved from Cosmos DB by its ID. In 
     FeedIterator<Food> queryB = container.GetItemQueryIterator<Food>(sqlB, requestOptions: new QueryRequestOptions{MaxConcurrency = 5, MaxItemCount = 100});
     ```
 
-    > Take note of the differences in this call to `GetItemQueryIterator()` as compared to the previous section. **MaxConcurrency** is set to `5`. MaxConcurrency Sets the maximum number of simultaneous network connections to the container's partitions. If you set this property to -1, the SDK manages the degree of parallelism. If the MaxConcurrency set to 0, there is a single network connection to the container's partitions. MaxItemCount trades query latency versus client-side memory utilization. If this option is omitted or to set to -1, the SDK manages the number of items buffered during parallel query execution. We are limiting the **MaxItemCount** to `100` items. This will result in paging if there are more than 100 items that match the query.
+    > Take note of the differences in this call to `GetItemQueryIterator()` as compared to the previous section. **MaxConcurrency** is set to `5`, allowing the SDK to query up to 5 partitions simultaneously for better performance. **MaxItemCount** is set to `100`, limiting each page to 100 items. Since this query doesn't filter by partition key, it must scan **all partitions** in the container, making it more expensive in terms of RU consumption.
 
-4. Add the following lines of code to page through the results of this query using a while loop.
+4. Add the following lines of code to page through the results of this query using a while loop. We'll also track RU consumption for each page to demonstrate the cost of cross-partition queries:
 
     ```csharp
     int pageCount = 0;
+    double totalRUForQueryB = 0;
     while (queryB.HasMoreResults)
     {
-        Console.Out.WriteLine($"---Page #{++pageCount:0000}---");
-        foreach (var food in await queryB.ReadNextAsync())
+        FeedResponse<Food> response = await queryB.ReadNextAsync();
+        totalRUForQueryB += response.RequestCharge;
+        
+        Console.Out.WriteLine($"---Page #{++pageCount:0000}--- (This page: {response.RequestCharge:0.00} RUs)");
+        foreach (var food in response)
         {
             Console.Out.WriteLine($"\t[{food.Id}]\t{food.Description,-20}\t{food.ManufacturerName,-40}");
         }
     }
+    Console.Out.WriteLine($"\n>>> Cross-Partition Query (sqlB) consumed {totalRUForQueryB:0.00} RUs across {pageCount} pages\n");
     ```
+
+    > By tracking RU consumption per page and in total, you can see the cumulative cost of querying across multiple partitions. Cross-partition queries typically consume significantly more RUs than single-partition queries.
 
 5. Save all of your open tabs in Visual Studio Code
 
@@ -183,12 +209,17 @@ ReadItemAsync allows a single item to be retrieved from Cosmos DB by its ID. In 
     dotnet run
     ```
 
-7. You should see a number of new results, each separated by the a line indicating the page.  Note that the results are coming from multiple partitions:
+7. You should see a number of new results, each separated by a line indicating the page and per-page RU cost. Note that the results are coming from multiple partitions:
 
     ```sql
         [19067] Candies, TWIZZLERS CHERRY BITES Hershey Food Corp.
-    ---Page #0017---
+    ---Page #0017--- (This page: 15.43 RUs)
         [14644] Beverages, , PEPSICO QUAKER, Gatorade G2, low calorie   Quaker Oats Company - The Gatorade Company,  a unit of Pepsi Co.
+    ...
+    
+    >>> Cross-Partition Query (sqlB) consumed 245.67 RUs across 23 pages
     ```
+
+    > **Key Takeaway**: Compare the total RU consumption between the two queries. The single-partition query (sqlA) consumed only a few RUs, while the cross-partition query (sqlB) consumed significantly more. This demonstrates why **partition key design** and **query patterns** are critical for optimizing Cosmos DB performance and cost. Always try to include the partition key in your WHERE clause when possible.
 
 > If this is your final lab, follow the steps in [Removing Lab Assets](11-cleaning_up.md) to remove all lab resources.
