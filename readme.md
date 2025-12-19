@@ -1,8 +1,8 @@
-# Azure Cosmos DB Workshop
+<!--# Azure Cosmos DB Workshop
 
 Visit Home Page at https://azurecosmosdb.github.io/labs/
 
-## Two Day Suggested Schedule
+ ## Two Day Suggested Schedule
 
 - [Sample Schedule](./decks/CosmosDBWorkshopSchedule2019.docx)
 
@@ -23,15 +23,15 @@ Visit Home Page at https://azurecosmosdb.github.io/labs/
 
 ## References
 
-- [Use-Case cheat sheet (1-pager)](./decks/1Pager-Use-Cases.pptx)
+- [Use-Case cheat sheet (1-pager)](./decks/1Pager-Use-Cases.pptx) -->
 
-In addition to the above workshop decks, we have hands-on labs. We have labs available for our .NET sdk and Java sdk below:
+# Azure Cosmos DB Labs
+
+We have hands-on labs available for .NET SDK:
 
 ---
 
 ## Core (SQL) API
-
-### .NET (V3) Labs
 
 #### .NET Lab Prerequisites
 
@@ -46,9 +46,9 @@ Prior to starting these labs, you must have the following operating system and s
 
 | Software                                    | Download Link                                                |
 | ------------------------------------------- | ------------------------------------------------------------ |
-| Git                                         | [/git-scm.com/downloads](https://git-scm.com/downloads)      |
-| .NET Core 3.1 (or greater) SDK <sup>1</sup> | [/download.microsoft.com/dotnet-sdk-3.1](https://dotnet.microsoft.com/download/dotnet-core/thank-you/sdk-3.1.401-windows-x64-installer) |
-| Visual Studio Code                          | [/code.visualstudio.com/download](https://go.microsoft.com/fwlink/?Linkid=852157) |
+| Git                                         | [https://git-scm.com/downloads](https://git-scm.com/downloads) |
+| .NET 9.0 SDK <sup>1</sup>                  | [https://dotnet.microsoft.com/download/dotnet/9.0](https://dotnet.microsoft.com/download/dotnet/9.0) |
+| Visual Studio Code                          | [https://code.visualstudio.com/download](https://code.visualstudio.com/download) |
 
 #### .NET Lab Guides
 
@@ -73,7 +73,7 @@ Prior to starting these labs, you must have the following operating system and s
 
 ---
 
-### Java Labs
+<!-- ### Java Labs
 
 #### Java Lab Prerequisites
 
@@ -116,27 +116,27 @@ Java 8 JRE (or greater) | [/jre8-downloads](https://www.oracle.com/technetwork/j
 
 1. When installing the Java 11 SDK or higher, this is bundled with a Java Runtime Environment (JRE). Make sure the JRE path (e.g: C:\Program Files\Java\jdk-11.0.2\bin\) is present at the top of your Path variable in System variables.
 1. If you already have Java installed on your local machine, you should check the version of your Java Runtime Environment (JRE) installation using the ``java -version`` command.
-1. If using a version of Java greater than version 8, some projects may not compile (for example the benchmarking application).
+1. If using a version of Java greater than version 8, some projects may not compile (for example the benchmarking application). -->
 
 ---
 
-## Gremlin API
+<!--## Gremlin API
 
-### Workshop Decks
+ ### Workshop Decks
 
 - [Introduction](./decks/Gremlin/GraphWorkshop_1_Introduction.pptx)
 - [Graph Modeling](./decks/Gremlin/GraphWorkshop_2_GraphModeling.pptx)
-- [Design Principles](./decks/Gremlin/GraphWorkshop_3_GraphDesignPrinciples.pptx)
+- [Design Principles](./decks/Gremlin/GraphWorkshop_3_GraphDesignPrinciples.pptx) -->
 
 ---
 
-## Cassandra API
+<!--## Cassandra API
 
-### Workshop Decks
+ ### Workshop Decks
 
-- [Introduction](./decks/Cassandra/Cassandra_Workshop_Introduction.pptx)
+- [Introduction](./decks/Cassandra/Cassandra_Workshop_Introduction.pptx) -->
 
-### Cassandra Labs
+<!-- ### Cassandra Labs
 
 *It is recommended to complete the labs in the order specified below:*
 
@@ -145,14 +145,14 @@ Java 8 JRE (or greater) | [/jre8-downloads](https://www.oracle.com/technetwork/j
 - [Lab 2: Query Data with CQLSH](cassandra/labs/02-querying_with_cqlsh.md)
 - [Lab 3: Implementing Retry and Failover](cassandra/labs/03-implementing_retry_and_failover.md)
 - [Lab 4: Change Feed with Spring Data](cassandra/labs/04-change_feed_with_spring_data.md)
-- [Lab 5: Cleaning Up](cassandra/labs/07-cleaning_up.md)
+- [Lab 5: Cleaning Up](cassandra/labs/07-cleaning_up.md) -->
 
 ---
 
-## Appendix: Stickers
+<!-- ## Appendix: Stickers
 
 Adobe Illustrator files for printing cosmic stickers (e.g. stickermule):
 
 - [2x2 inch black circle](./stickers/2x2-circle-template-CosmosBlack.ai)
 - [2x2 inch clear circle](./stickers/2x2-clear-sticker-template-CosmosClear.ai)
-- [Die-cut color logo](./stickers/cosmos-die-cut-sticker-template-v2.ai)
+- [Die-cut color logo](./stickers/cosmos-die-cut-sticker-template-v2.ai) -->

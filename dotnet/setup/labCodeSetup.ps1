@@ -1,4 +1,4 @@
-param($codePath = "$Home\Documents")
+param($codePath = "$PSScriptRoot\..")
 
 $targetPath = "$codePath\CosmosLabs"
 
